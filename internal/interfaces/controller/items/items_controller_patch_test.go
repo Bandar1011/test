@@ -134,6 +134,32 @@ func TestItemHandler_PatchItem(t *testing.T) {
 			},
 		},
 		{
+			name:   "Success - update brand only",
+			itemID: "1",
+			requestBody: map[string]interface{}{
+				"brand": "Updated Brand Name",
+			},
+			setupMock: func(mockUsecase *MockItemUsecase) {
+				updatedItem, _ := entity.NewItem("時計1", "時計", "Updated Brand Name", 1000000, "2023-01-01")
+				updatedItem.ID = 1
+				updatedItem.CreatedAt = time.Date(2023, 1, 1, 0, 0, 0, 0, time.UTC)
+				updatedItem.UpdatedAt = time.Now()
+
+				req := &usecase.UpdateItemRequest{
+					Brand: stringPtr("Updated Brand Name"),
+				}
+				mockUsecase.On("PatchItem", mock.Anything, int64(1), req).Return(updatedItem, nil)
+			},
+			expectedStatus: http.StatusOK,
+			validateResponse: func(t *testing.T, rec *httptest.ResponseRecorder) {
+				var item entity.Item
+				err := json.Unmarshal(rec.Body.Bytes(), &item)
+				assert.NoError(t, err)
+				assert.Equal(t, "Updated Brand Name", item.Brand)
+				assert.Equal(t, int64(1), item.ID)
+			},
+		},
+		{
 			name:   "Success - update multiple fields",
 			itemID: "1",
 			requestBody: map[string]interface{}{
