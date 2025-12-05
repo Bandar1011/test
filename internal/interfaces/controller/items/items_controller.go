@@ -12,6 +12,13 @@ import (
 	"github.com/labstack/echo/v4"
 )
 
+const (
+	// Immutable field names that cannot be updated via PATCH
+	fieldID        = "id"
+	fieldCreatedAt = "created_at"
+	fieldUpdatedAt = "updated_at"
+)
+
 type ItemHandler struct {
 	itemUsecase usecase.ItemUsecase
 }
@@ -22,10 +29,48 @@ func NewItemHandler(itemUsecase usecase.ItemUsecase) *ItemHandler {
 	}
 }
 
-// エラーレスポンスの形式
+// ErrorResponse represents the standard error response format
 type ErrorResponse struct {
 	Error   string   `json:"error"`
 	Details []string `json:"details,omitempty"`
+}
+
+// parseItemID extracts and validates the item ID from the URL parameter
+func parseItemID(idStr string) (int64, error) {
+	if idStr == "" {
+		return 0, strconv.ErrSyntax
+	}
+	return strconv.ParseInt(idStr, 10, 64)
+}
+
+// parseValidationErrorDetails extracts validation error details from a wrapped error
+func parseValidationErrorDetails(err error) []string {
+	details := []string{err.Error()}
+	if strings.Contains(err.Error(), ": ") {
+		parts := strings.SplitN(err.Error(), ": ", 2)
+		if len(parts) == 2 {
+			details = strings.Split(parts[1], ", ")
+		}
+	}
+	return details
+}
+
+// checkImmutableFields validates that the request body doesn't contain immutable fields
+func checkImmutableFields(requestBody map[string]interface{}) []string {
+	var errors []string
+	immutableFields := map[string]string{
+		fieldID:        "id is immutable",
+		fieldCreatedAt: "created_at is immutable",
+		fieldUpdatedAt: "updated_at is immutable",
+	}
+
+	for field, message := range immutableFields {
+		if _, exists := requestBody[field]; exists {
+			errors = append(errors, message)
+		}
+	}
+
+	return errors
 }
 
 func (h *ItemHandler) GetItems(c echo.Context) error {
@@ -40,8 +85,7 @@ func (h *ItemHandler) GetItems(c echo.Context) error {
 }
 
 func (h *ItemHandler) GetItem(c echo.Context) error {
-	idStr := c.Param("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
+	id, err := parseItemID(c.Param("id"))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Error: "invalid item ID",
@@ -96,8 +140,7 @@ func (h *ItemHandler) CreateItem(c echo.Context) error {
 }
 
 func (h *ItemHandler) DeleteItem(c echo.Context) error {
-	idStr := c.Param("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
+	id, err := parseItemID(c.Param("id"))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Error: "invalid item ID",
@@ -131,8 +174,7 @@ func (h *ItemHandler) GetSummary(c echo.Context) error {
 }
 
 func (h *ItemHandler) PatchItem(c echo.Context) error {
-	idStr := c.Param("id")
-	id, err := strconv.ParseInt(idStr, 10, 64)
+	id, err := parseItemID(c.Param("id"))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Error: "invalid item ID",
@@ -148,18 +190,7 @@ func (h *ItemHandler) PatchItem(c echo.Context) error {
 	}
 
 	// Check for immutable fields
-	var immutableErrors []string
-	if _, exists := requestBody["id"]; exists {
-		immutableErrors = append(immutableErrors, "id is immutable")
-	}
-	if _, exists := requestBody["created_at"]; exists {
-		immutableErrors = append(immutableErrors, "created_at is immutable")
-	}
-	if _, exists := requestBody["updated_at"]; exists {
-		immutableErrors = append(immutableErrors, "updated_at is immutable")
-	}
-
-	if len(immutableErrors) > 0 {
+	if immutableErrors := checkImmutableFields(requestBody); len(immutableErrors) > 0 {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Error:   "validation failed",
 			Details: immutableErrors,
@@ -168,7 +199,13 @@ func (h *ItemHandler) PatchItem(c echo.Context) error {
 
 	// Parse into UpdateItemRequest struct
 	var req usecase.UpdateItemRequest
-	bodyBytes, _ := json.Marshal(requestBody)
+	bodyBytes, err := json.Marshal(requestBody)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, ErrorResponse{
+			Error: "invalid request format",
+		})
+	}
+
 	if err := json.Unmarshal(bodyBytes, &req); err != nil {
 		return c.JSON(http.StatusBadRequest, ErrorResponse{
 			Error: "invalid request format",
@@ -183,18 +220,9 @@ func (h *ItemHandler) PatchItem(c echo.Context) error {
 			})
 		}
 		if domainErrors.IsValidationError(err) {
-			// Parse validation error details
-			details := []string{err.Error()}
-			if strings.Contains(err.Error(), ": ") {
-				parts := strings.SplitN(err.Error(), ": ", 2)
-				if len(parts) == 2 {
-					// Split multiple validation errors
-					details = strings.Split(parts[1], ", ")
-				}
-			}
 			return c.JSON(http.StatusBadRequest, ErrorResponse{
 				Error:   "validation failed",
-				Details: details,
+				Details: parseValidationErrorDetails(err),
 			})
 		}
 		return c.JSON(http.StatusInternalServerError, ErrorResponse{

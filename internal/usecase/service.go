@@ -10,6 +10,12 @@ import (
 	domainErrors "Aicon-assignment/internal/domain/errors"
 )
 
+const (
+	maxNameLength  = 100
+	maxBrandLength = 100
+	minPrice       = 0
+)
+
 type ItemUsecase interface {
 	GetAllItems(ctx context.Context) ([]*entity.Item, error)
 	GetItemByID(ctx context.Context, id int64) (*entity.Item, error)
@@ -143,29 +149,8 @@ func (u *itemUsecase) PatchItem(ctx context.Context, id int64, req *UpdateItemRe
 	// Update timestamp
 	item.UpdatedAt = time.Now()
 
-	// Validate updated item (only for fields that can be updated)
-	var validationErrors []string
-	if req.Name != nil {
-		if item.Name == "" {
-			validationErrors = append(validationErrors, "name is required")
-		} else if len(item.Name) > 100 {
-			validationErrors = append(validationErrors, "name must be 100 characters or less")
-		}
-	}
-	if req.Brand != nil {
-		if item.Brand == "" {
-			validationErrors = append(validationErrors, "brand is required")
-		} else if len(item.Brand) > 100 {
-			validationErrors = append(validationErrors, "brand must be 100 characters or less")
-		}
-	}
-	if req.PurchasePrice != nil {
-		if item.PurchasePrice < 0 {
-			validationErrors = append(validationErrors, "purchase_price must be >= 0")
-		}
-	}
-
-	if len(validationErrors) > 0 {
+	// Validate updated fields
+	if validationErrors := validateUpdateRequest(req, item); len(validationErrors) > 0 {
 		return nil, fmt.Errorf("%w: %s", domainErrors.ErrInvalidInput, strings.Join(validationErrors, ", "))
 	}
 
@@ -206,4 +191,33 @@ func (u *itemUsecase) GetCategorySummary(ctx context.Context) (*CategorySummary,
 		Categories: summary,
 		Total:      total,
 	}, nil
+}
+
+// validateUpdateRequest validates the fields being updated in a PATCH request
+func validateUpdateRequest(req *UpdateItemRequest, item *entity.Item) []string {
+	var validationErrors []string
+
+	if req.Name != nil {
+		if item.Name == "" {
+			validationErrors = append(validationErrors, "name is required")
+		} else if len(item.Name) > maxNameLength {
+			validationErrors = append(validationErrors, fmt.Sprintf("name must be %d characters or less", maxNameLength))
+		}
+	}
+
+	if req.Brand != nil {
+		if item.Brand == "" {
+			validationErrors = append(validationErrors, "brand is required")
+		} else if len(item.Brand) > maxBrandLength {
+			validationErrors = append(validationErrors, fmt.Sprintf("brand must be %d characters or less", maxBrandLength))
+		}
+	}
+
+	if req.PurchasePrice != nil {
+		if item.PurchasePrice < minPrice {
+			validationErrors = append(validationErrors, fmt.Sprintf("purchase_price must be >= %d", minPrice))
+		}
+	}
+
+	return validationErrors
 }
